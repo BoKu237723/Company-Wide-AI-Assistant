@@ -111,5 +111,5 @@ Google Drive/
 ## Possible Next Features Updates
 These following are ideas for features that could be added in future versions.
 
-### API UPDATE
+### Confident scoring
 - Automatic department classification with confidence scoring, allowing user directly ask question without needing to clarify department.
