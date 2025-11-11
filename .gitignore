@@ -1,2 +1,6 @@
 credentials.json
 drive_token.pickle
+testing/
+notes/
+rnn_models/
+__pycache__/

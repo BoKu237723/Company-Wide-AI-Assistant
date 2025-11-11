@@ -10,12 +10,16 @@ import re
 import io
 import zipfile
 import xml.etree.ElementTree as ET
+import datetime
+
+from rnn import DepartmentClassifier
 
 class DepartmentAI:
     def __init__(self):
         self.departments = ['finance', 'marketing', 'IT']
-        self.service = None
         self.drive_service = None
+        self.classifier = DepartmentClassifier()
+        self.classifier.setup_rnn_model()
         self.authenticate_services()
         
     def authenticate_services(self):
@@ -342,26 +346,79 @@ class DepartmentAI:
         except Exception as e:
             return f"Error loading AI prompt: {e}"
 
-    def query_ollama(self, department, question):
-        system_prompt = self.load_ai_prompt(department)
-        if not system_prompt or system_prompt.startswith("Error"):
-            return f"Error: Could not load AI prompt - {system_prompt}"
+    # def query_ollama(self, department, question):
+    #     system_prompt = self.load_ai_prompt(department)
+    #     if not system_prompt or system_prompt.startswith("Error"):
+    #         return f"Error: Could not load AI prompt - {system_prompt}"
         
-        try:
-            print("🤔 Processing your question with AI...")
-            response = ollama.chat(model='llama3.1:8b', messages=[
-                {
-                    'role': 'system',
-                    'content': system_prompt
-                },
-                {
-                    'role': 'user',
-                    'content': question
+    #     try:
+    #         print("🤔 Processing your question with AI...")
+    #         response = ollama.chat(model='llama3.1:8b', messages=[
+    #             {
+    #                 'role': 'system',
+    #                 'content': system_prompt
+    #             },
+    #             {
+    #                 'role': 'user',
+    #                 'content': question
+    #             }
+    #         ])
+    #         return response['message']['content']
+    #     except Exception as e:
+    #         return f"Error in query_ollama: {e}"
+
+    def query_multiple_departments(self, question, min_confidence=0.2):
+        classification = self.classifier.enhanced_classify_department(question)
+        relevant_departments = [
+            dept for dept in classification['departments']
+            if dept['confidence'] >= min_confidence
+        ]
+
+        if not relevant_departments:
+            relevant_departments = [classification['departments'][0]]
+            print(f"⚠️ All departments below threshold, using top result: {relevant_departments[0]['department']}")
+
+        print(f"\n🎯 Classification Results:")
+        for dept in classification['departments']:
+            status = "✅ Selected" if dept in relevant_departments else "⚡ BELOW THRESHOLD"
+            method_icon = "🧠" if dept.get('method') == 'RNN' else "🤖"
+            print(f"   {method_icon} {dept['department'].upper()}: {dept['confidence']:.3f} - {status}")
+            print(f"      💡 {dept['reason']}")
+
+        answers = {}
+
+        for dept_info in relevant_departments:
+            department = dept_info['department']
+            confidence = dept_info['confidence']
+
+            print(f"\n🔍 Querying {department} department (confidence: {confidence:.3f})...")
+
+            system_prompt = self.load_ai_prompt(department)
+            if not system_prompt or system_prompt.startswith("Error"):
+                answers[department] = f"Error: Could not load data for {department} department"
+                continue
+
+            try:
+                response = ollama.chat(model='llama3.1:8b', messages=[
+                    {
+                        'role' : 'system',
+                        'content' : system_prompt
+                    },
+                    {
+                        'role' : 'user',
+                        'content' : question
+                    }
+                ])
+
+                answers[department] = {
+                    'answer' : response['message']['content'],
+                    'confidence' : confidence
                 }
-            ])
-            return response['message']['content']
-        except Exception as e:
-            return f"Error in query_ollama: {e}"
+
+            except Exception as e:
+                answers[department] = f"Error querying {department}: {e}"
+        return answers, classification
+
 
     def get_available_departments(self):
         print("\n🔍 Scanning for available department data...")
@@ -385,14 +442,17 @@ class DepartmentAI:
             except Exception as e:
                 print(f"❌ Error checking {department} department: {e}")
                 continue
-        #print(f"Available : {available}")
         return available
+    
 
 def main():
-    print("🔧 Company Department AI Assistant - Memory Only")
+    print("🔧 Company Department AI Assistant - RNN Enhanced with Persistance")
     print("=" * 55)
     print("✅ Reads files directly in memory - no downloads to disk")
     print("✅ Supports: Google Docs, Word (.docx), PDF, Text files")
+    print("✅ RNN for faste department classification")
+    print("✅ Continuous learning from interactions")
+    print("✅ Training history tracked")
     
     try:
         with open('credentials.json', 'r') as f:
@@ -415,6 +475,17 @@ def main():
         print("❌ Failed to initialize Google Drive service")
         return
     
+    initial_data = ai.classifier.load_or_create_initial_data()
+
+    if initial_data and len(initial_data) >= 5 and not ai.classifier.rnn_model:
+        print(f"🧠 Training RNN with {len(initial_data)} initial samples...")
+        split_idx = int(0.8 * len(initial_data))
+        train_data = initial_data[:split_idx]
+        val_data = initial_data[split_idx:]
+
+        accuracy = ai.classifier.train_rnn_with_saving(train_data, val_data)
+        print(f"✅ Initial training complete! Accuracy: {accuracy:.3f}")
+    
     available_departments = ai.get_available_departments()
     
     if not available_departments:
@@ -422,26 +493,66 @@ def main():
         return
     
     print(f"\n🎉 Ready! Available Departments: {', '.join(available_departments)}")
-    print("Type 'quit' to exit\n")
+    print("Type 'quit' to exit")
+    print("Type 'save' to save model")
+    print("Type 'status' to show model status\n")
+
+    conversation_history = []
 
     while True:
-        department = input("Which department do you want to ask about?\nYou: ")
-        if department == 'quit':
-            break
-        if department not in ai.departments:
-            print("Invalid department. Please choose from:", ", ".join(ai.departments))
+        question = input(f"What is your question?\nYou: ").strip()
+
+        if question.lower() == 'status':
+            ai.classifier.print_model_status()
             continue
 
-        question = input(f"What is your question for the {department} department?\nYou: ")
+        if question.lower() == 'save':
+            ai.classifier.save_model_complete()
+            continue
 
         if question.lower() == 'quit':
             break
 
+        if not question:
+            continue
+
         print("\n🤔 Thinking...")
-        answer = ai.query_ollama(department, question)
-        print(f"\n=== {department.upper()} DEPARTMENT ANSWER ===")
-        print(answer)
-        print("=" * 50 + "\n")
+
+        answers, classification = ai.query_multiple_departments(question)
+
+        interaction = {
+            'question' : question,
+            'answers' : answers,
+            'classification' : classification,
+            'timestamp' : datetime.datetime.now().isoformat()
+        }
+
+        conversation_history.append(interaction)
+
+        print(f"\n{'='*65}")
+        print("🎯 ANSWERS:")
+
+        for department, answer_data in answers.items():
+            confidence = answer_data.get('confidence', 0)
+            confidence_color = "🟢" if confidence >= 0.7 else "🟡" if confidence >= 0.4 else "🔴"
+            
+            print(f"\n--- {confidence_color} {department.upper()} DEPARTMENT (Confidence: {confidence:.3f}) ---")
+            
+            if isinstance(answer_data, dict) and 'answer' in answer_data:
+                print(answer_data['answer'])
+            else:
+                print(answer_data)
+            
+            print("-" * 50)
+        if len(conversation_history) % 5 == 0:
+            print("\n🔄 Learning from recent interactions...")
+            ai.classifier.continuous_learning(conversation_history[-5:])
+        
+        print("\n")
+
+    print("\n💾 Saving final model state...")
+    ai.classifier.save_model_complete()
+    print("👋 Goodbye! Your model improvements have been saved.")
 
 if __name__ == "__main__":
     main()
