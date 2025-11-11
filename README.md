@@ -1,4 +1,4 @@
-# Company-Wide-AI-Assistant (Version-2.0.0)
+# Company-Wide-AI-Assistant (Version-2.1.0)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/BoKu237723/Repo-Images/main/Company-Wide-AI-Assistant.png" alt="Company Wide AI Assistant" width="500"/>
